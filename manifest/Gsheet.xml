@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Package xmlns="http://soap.sforce.com/2006/04/metadata">
+    <version>57.0</version>
+     <types>
+        <members>JSONParse</members>
+        <members>JSONParseTests</members>
+        <members>MockHttpResponseGenerator</members>
+        <members>GSheetTest</members>
+        <members>GSheet</members>
+        <name>ApexClass</name>
+    </types>
+</Package>
