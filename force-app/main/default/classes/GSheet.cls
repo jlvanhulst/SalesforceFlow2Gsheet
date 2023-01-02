@@ -87,8 +87,12 @@ public with sharing class GSheet {
                 For (String Field : fieldList ){
                     if (i>0) {
                         json+=',';
+                    }    
+                    try {     
+                        json += '"'+stringify(fieldsAndValues.get(Field))+'"';  
+                    } catch (Exception e) {
+                        json   = '\''+Field+'\' not found!';      
                     }          
-                    json += '"'+stringify(fieldsAndValues.get(Field))+'"';            
                     i++;
                 }          
                 json += ' ]';
@@ -128,7 +132,7 @@ public with sharing class GSheet {
             system.debug('##X'+responseHttp.getBody());
             JSONParse parser = new JSONParse(responseHttp.getBody()).get('sheets');
             for(JSONParse sheet : parser.asList()) {
-                System.debug('##S'+String.valueOf(sheet.get('properties.sheetId').getIntegerValue()));
+              //  System.debug('##S'+String.valueOf(sheet.get('properties.sheetId').getIntegerValue()));
                 if (sheet.get('properties.sheetId').getIntegerValue()==gid) {
                     TabTitle = sheet.get('properties.title').getStringValue() ;
                     System.debug('## gid found title ='+TabTitle);
@@ -173,7 +177,14 @@ public with sharing class GSheet {
             if (i>0) {
                 header+=',';
             }
-            field = fieldMap.get(Field).getDescribe().getLabel();
+            try {
+                field = fieldMap.get(Field).getDescribe().getLabel();
+            } catch (Exception e) {
+                field   = '\''+Field+'\' not found!';        
+            }
+
+
+
             header += '"'+field+'"';
             i++;
         }
@@ -198,7 +209,11 @@ public with sharing class GSheet {
             i++;
         }
         For (String Field : fieldList ){
-            field =  String.valueOf(fieldMap.get(Field).getDescribe().getType());
+            try {
+                field =  String.valueOf(fieldMap.get(Field).getDescribe().getType());
+            } catch (Exception e) {
+                field   = 'UNKOWN FIELD';        
+            }
             if (field=='CURRENCY') {
                 if (i>0) {
                     requestStr+=',';
