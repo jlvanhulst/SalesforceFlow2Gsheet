@@ -11,4 +11,4 @@ The only difference is the scope needed. (  https://www.googleapis.com/auth/spre
        src="https://raw.githubusercontent.com/afawcett/githubsfdeploy/master/deploy.png">
 </a>
 
-Note: this version wil do 'one call' to transfer all values so there is probably a limit as to how man rows it will succesfully handle. Probably the 6mb heaplimit will be hit before the Google Sheets limit. Will be a nice to have for a next version to be able to give a number of rows to be updated at once. 
+Note: this version wil do 'one call' to transfer all values so there is probably a limit as to how many rows it will succesfully handle. Probably the 6mb heaplimit will be hit before the Google Sheets limit. Will be a nice to have for a next version to be able to give a number of rows to be updated at once. 
