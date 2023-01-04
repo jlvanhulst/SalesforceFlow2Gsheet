@@ -1,8 +1,14 @@
 {
-  "name": "Gsheet",
+  "name": "gsheet",
   "private": false,
   "version": "1.0.0",
   "description": "Ghseet export flow actions",
+  "packageDirectories" : [
+    {
+      "path": "force-app/main/default",
+      "default": true
+    }
+  ],
   "scripts": {
     "lint": "eslint **/{aura,lwc}/**",
     "test": "npm run test:unit",

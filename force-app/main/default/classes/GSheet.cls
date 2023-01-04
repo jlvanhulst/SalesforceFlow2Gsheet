@@ -11,6 +11,7 @@ public with sharing class GSheet {
     public static String[] fieldList;            // list of display names of fields (columns)
     public static string fileName;               // the full url of the google spreadsheet
     public static string lastError;
+    public static List<String> columnTypes;
     
     @invocableMethod(label='Export any colletion of sOjects to a Google Spreadsheet' description='Provide a collection of records and google spreadsheet ID and optionally a list of fieldnames.')
     public static List<Response> row(List<Request> request) {
@@ -18,6 +19,7 @@ public with sharing class GSheet {
         lastError ='';
         
         List<Response> responseList = new List<Response>();
+        columnTypes = new List<String>();
         Response response = new Response();    
         
         if (request[0].offset==null) {
@@ -46,8 +48,6 @@ public with sharing class GSheet {
             pm = p.matcher( fileName );
             pm.find();
             gid = Integer.valueOf( pm.group(1) );
-            system.debug('##reg gid ='+pm.group(1));
-            
         }
         
         allObjects    = request[0].inputObjects;
@@ -73,8 +73,8 @@ public with sharing class GSheet {
             string json = '[';  
             integer row = 0;
             
+            response.header =  header(); // run allways to set column types
             if (IncludeHeader) {
-                response.header =  header();
                 json +=  response.header;
                 row++;
             }
@@ -89,7 +89,7 @@ public with sharing class GSheet {
                         json+=',';
                     }    
                     try {     
-                        json += '"'+stringify(fieldsAndValues.get(Field))+'"';  
+                        json += '"'+stringify(fieldsAndValues.get(Field),columnTypes[i])+'"';  
                     } catch (Exception e) {
                         json   = '\''+Field+'\' not found!';      
                     }          
@@ -107,13 +107,19 @@ public with sharing class GSheet {
             response.range = range(response.rows, response.columns); //'A'+ String.valueOf(request[0].offset+1)+':'+onchar+String.valueOf(response.rows+request[0].offset);            
             responseHttp = executeCallout('PUT','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId+'/values/'+response.range+'?&valueInputOption=USER_ENTERED',response.jsonstring);
             response.ResponseCode = responseHttp.getStatusCode();
-            response.ErrorMessage = responseHttp.getStatus();            
-            
-            String formatRequest = format() ;
-            if (formatRequest.length()>0){
-                responseHttp = executeCallout('POST','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId+':batchUpdate',formatRequest);
-                response.ResponseCode = responseHttp.getStatusCode();
-                response.ErrorMessage = responseHttp.getStatus();
+            if (responseHttp.getStatusCode()!=200) {
+                response.ErrorMessage = responseHttp.getStatus()+' - '+response.jsonstring;
+            } else {
+                String formatRequest = format() ;
+                if (formatRequest.length()>0){
+                    responseHttp = executeCallout('POST','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId+':batchUpdate',formatRequest);
+                    response.ResponseCode = responseHttp.getStatusCode();
+                    if (responseHttp.getStatusCode()!=200) {
+                        response.ErrorMessage = responseHttp.getStatus()+' - '+formatRequest;
+                    } else {
+                        response.ErrorMessage = responseHttp.getStatus();
+                    }
+                }
             }
         } else {
             response.ErrorMessage ='Spreadsheet or tab(gid) not found/accesible. - '+lastError;
@@ -122,20 +128,19 @@ public with sharing class GSheet {
         return responseList;     
     } 
 
-
     public static boolean parsesheets() {
         // verify the spreadsheet exist and is accesible - then verify the tab id (gid) and retrieve the title for the target GID
         HttpResponse responseHttp = executeCallout('GET','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId);
         boolean ret = (responseHttp.getStatusCode()==200);
         if (ret) {
             ret = false ;// spreadsheet exists but we must also find the gid!
-            system.debug('##X'+responseHttp.getBody());
+           // system.debug('##X'+responseHttp.getBody());
             JSONParse parser = new JSONParse(responseHttp.getBody()).get('sheets');
             for(JSONParse sheet : parser.asList()) {
               //  System.debug('##S'+String.valueOf(sheet.get('properties.sheetId').getIntegerValue()));
                 if (sheet.get('properties.sheetId').getIntegerValue()==gid) {
                     TabTitle = sheet.get('properties.title').getStringValue() ;
-                    System.debug('## gid found title ='+TabTitle);
+     //               System.debug('## gid found title ='+TabTitle);
                     return true;
                 } 
             }
@@ -170,22 +175,22 @@ public with sharing class GSheet {
     public static String header() {
         Schema.SObjectType leadSchema =  FirstObject.getSObjectType();
         Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
-        
         String header ='[';
+        String fieldName;
         Integer i = 0;
-        For (String Field : fieldList ){
+        For (String field : fieldList ){
             if (i>0) {
                 header+=',';
             }
             try {
-                field = fieldMap.get(Field).getDescribe().getLabel();
+                fieldName = fieldMap.get(field).getDescribe().getLabel();
+                columnTypes.add( fieldMap.get(field).getDescribe().getType().name() );
             } catch (Exception e) {
-                field   = '\''+Field+'\' not found!';        
+                fieldName   = '\''+field+'\' not found!';   
+                columnTypes.add('STRING');     
             }
-
-
-
-            header += '"'+field+'"';
+            System.debug('## '+field+' - '+columnTypes[i]);
+            header += '"'+fieldName+'"';
             i++;
         }
         header += ' ]';
@@ -202,10 +207,11 @@ public with sharing class GSheet {
         String one;
         Integer headerCount = 0;
         Integer rows = allObjects.size();
-        
+        Integer digits;
+        String formatPart;
         if (IncludeHeader) {
             headerCount ++;
-            requestStr +=   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(ColOffset)+',"startRowIndex": '+String.valueOf(RowOffset)+',"endColumnIndex": '+String.valueOf(ColOffset+fieldList.size())+', "endRowIndex": '+String.valueOf(RowOffset+headerCount)+' },  "fields": "userEnteredFormat.textFormat.bold",  "cell": {"userEnteredFormat": { "textFormat": { "bold": true }}}}} ';
+            requestStr +=   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(ColOffset)+',"startRowIndex": '+String.valueOf(RowOffset)+',"endColumnIndex": '+String.valueOf(ColOffset+fieldList.size())+', "endRowIndex": '+String.valueOf(RowOffset+headerCount)+' },  "fields": "userEnteredFormat.textFormat.bold",  "cell": {"userEnteredFormat": { "textFormat": { "bold": true }}}}}';
             i++;
         }
         For (String Field : fieldList ){
@@ -214,13 +220,26 @@ public with sharing class GSheet {
             } catch (Exception e) {
                 field   = 'UNKOWN FIELD';        
             }
-            if (field=='CURRENCY') {
+            if (field=='CURRENCY'||field=='DOUBLE'||field=='PERCENT'||field=='INTEGER') {
                 if (i>0) {
                     requestStr+=',';
                 }
-                one =   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(col+ColOffset)+',"startRowIndex": '+String.valueOf(RowOffset+headerCount)+',"endColumnIndex": '+String.valueOf(col+ColOffset+1)+', "endRowIndex": '+String.valueOf(rows+RowOffset+headerCount)+' },  "fields": "userEnteredFormat.numberFormat",  "cell": {"userEnteredFormat": { "numberFormat": { "type": "CURRENCY" }}}}} ';
+                switch on field {
+                    when 'CURRENCY' {
+                       formatPart = '{ "numberFormat": {"type": "CURRENCY" }}' ;
+                    }
+                    when 'INTEGER' {
+                        formatPart = '{ "numberFormat": {"type": "NUMBER", "pattern": "#,##0" }}' ;
+                    }
+                    when 'DOUBLE' {
+                        formatPart = '{ "numberFormat": {"type": "NUMBER", "pattern": "#,##0.00" }}' ;
+                    }
+                    when 'PERCENT' {
+                        formatPart = '{ "numberFormat": {"type": "PERCENT" }}' ;
+                    }
+                }
+                one =   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(col+ColOffset)+',"startRowIndex": '+String.valueOf(RowOffset+headerCount)+',"endColumnIndex": '+String.valueOf(col+ColOffset+1)+', "endRowIndex": '+String.valueOf(rows+RowOffset+headerCount)+' },  "fields": "userEnteredFormat.numberFormat",  "cell": {"userEnteredFormat": '+formatPart+'}}} ';
                 requestStr += one;
-                System.debug('##F '+one);
                 
                 i++;
             }
@@ -236,7 +255,7 @@ public with sharing class GSheet {
     }  
     
     
-    public static String stringify( object o ){ 
+    public static String stringify( object o ,String fieldType){ 
         if(o==null)                         return '';              // we can't say much about null
         String                              result  = 'Object';     // if we can't find out anything, we will return 'Object'
         if(o instanceof SObject)            return ((SObject)o).getSObjectType().getDescribe().getName()+''; 
@@ -249,6 +268,7 @@ public with sharing class GSheet {
         if(o instanceof Time)               return 'Time';
         if(o instanceof Integer)            return String.valueOf((integer)o);
         if(o instanceof Long)               return String.valueOf((Long)o);
+        if(o instanceof Decimal && fieldType=='PERCENT')     return String.valueOf(((Decimal)o)/100);
         if(o instanceof Decimal)            return String.valueOf((Decimal)o);
         if(o instanceof Double)             return String.valueOf((Double)o);
         if(o instanceof List<object>)       return 'List';
@@ -294,6 +314,7 @@ public with sharing class GSheet {
             }
         }
         HttpResponse response = new Http().send(request);
+        System.debug('##R '+requestBody);
         return response;
     }  
     
