@@ -16,10 +16,15 @@ public with sharing class GSheetTest {
         aList.add(element);
         
         List<GSheet.Response> testResponseList = GSheet.row(aList);
-        
-        element.fieldList ='Website,Name; Website';
+        element.googleFileUrl='https://docs.google.com/spreadsheets/d/testid123/edit#gid=1229423180';    
+        element.fieldList ='Website,Name,AnnualRevenue';
         List<GSheet.Response> testResponseList2 = GSheet.row(aList);
         
+        element.createNew = true;
+        element.googleFileUrl=null;
+        element.googleSheetId = null;
+        List<GSheet.Response> testResponseList3 = GSheet.row(aList);
+
     }
     
 }
