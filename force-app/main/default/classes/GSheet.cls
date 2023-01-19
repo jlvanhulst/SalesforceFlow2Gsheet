@@ -1,19 +1,19 @@
 public with sharing class GSheet {
-    public static string SpreadsheetId;          // google spreadsheet id
+    public static string spreadsheetId;          // google spreadsheet id
     public static integer gid;                   // tab id within the spreadsheet (gid=0 is default)
-    public static string TabTitle;               // Title of the sheets, used for updating values. Retrieved from the spreadsheet properties based on gid
-    public static string CallOut;                // named credential to use
-    public static boolean IncludeHeader;         // add a header row - default true
-    public static integer ColOffset;             // column offset - default is 0
-    public static integer RowOffset;             // row offset - default is 0
-    public static SObject FirstObject;           // first object of the collection 
+    public static string tabTitle;               // Title of the sheets, used for updating values. Retrieved from the spreadsheet properties based on gid
+    public static string callOut;                // named credential to use
+    public static boolean includeHeader;         // add a header row - default true
+    public static integer colOffset;             // column offset - default is 0
+    public static integer rowOffset;             // row offset - default is 0
+    public static SObject firstObject;           // first object of the collection 
     public static List<Sobject> allObjects;      // collection of records to be exported
     public static String[] fieldList;            // list of display names of fields (columns)
     public static string fileName;               // the full url of the google spreadsheet
     public static string lastError;              // the last API call error description
     public static List<String> columnTypes;      // Keep track of the object type per column
     
-    @invocableMethod(label='Export any collection of sOjects to a Google Spreadsheet' description='Provide a collection of records and google spreadsheet ID and optionally a list of fieldnames.')
+    @invocableMethod(label='Export any collection of sOjects to a Google Spreadsheet' description='Provide a collection of records or an SOQL query and export them to a Google Spreadsheet')
     public static List<Response> row(List<Request> request) {
         HttpResponse responseHttp;
         lastError ='';
@@ -24,16 +24,24 @@ public with sharing class GSheet {
  
         // Let's check if we have any records to export. Should we allow this now that we have the createNew option? The only allow 
         // creating a new empty spreadsheet, but not adding records to it?
-        
+        if (request[0].soqlQuery!=null) {
+            try {
+                request[0].inputObjects = Database.query(request[0].soqlQuery);
+            } catch (Exception e) {
+                response.ErrorMessage = 'Error in SOQL query: '+e.getMessage();
+                responseList.add(response);
+                return responseList;      
+            }
+        } 
         if (request[0].inputObjects==null) {
             response.ErrorMessage = 'No records provided!';
             responseList.add(response);
             return responseList;      
         }
         allObjects    = request[0].inputObjects;
-        FirstObject   = request[0].inputObjects[0];
+        firstObject   = request[0].inputObjects[0];
         fieldList     = new List<String>();
-        CallOut       = Request[0].callout;
+        callOut       = Request[0].callout;
 
         // Set default values for optional parameters
         if (request[0].offset==null) {
@@ -45,16 +53,13 @@ public with sharing class GSheet {
         if (request[0].includeHeader==null) {
             request[0].includeHeader = true;
         }
-        if (request[0].tabId==null) {
-            request[0].tabId =0;
-        }
         if (request[0].createNew==null) {
             request[0].createNew =False;
         }
 
-        IncludeHeader = request[0].includeHeader;
-        RowOffset     = request[0].offset;
-        ColOffset     = request[0].colOffset;
+        includeHeader = request[0].includeHeader;
+        rowOffset     = request[0].offset;
+        colOffset     = request[0].colOffset;
  
         /* The google spreadsheet ID can be provided directly as a parameter or through the full spreadsheet url. 
          If both are provided, the ID in the request will be used.
@@ -62,22 +67,22 @@ public with sharing class GSheet {
          If none is provided, a new spreadsheet will be created if the createNew parameter is set to true.
         */
         if (request[0].googleFileUrl==null||request[0].googleFileUrl=='') {
-            SpreadsheetId = request[0].googleSheetId;
+            spreadsheetId = request[0].googleSheetId;
         } else {
             fileName = request[0].googleFileUrl;
             Pattern p = Pattern.compile('/spreadsheets/d/([a-zA-Z0-9-_]+)' );
             Matcher pm = p.matcher( fileName );
             pm.find();
-            SpreadsheetId = pm.group(1);
-            system.debug('##reg id='+pm.group(1));
+            spreadsheetId = pm.group(1);
             
             p = Pattern.compile('[#&]gid=([0-9]+)');
             pm = p.matcher( fileName );
             pm.find();
             gid = Integer.valueOf( pm.group(1) );
+
         }
         // We should have a spreadsheetId by now. If not, we need to create a new one.
-        if (SpreadsheetId==null||SpreadsheetId=='') {
+        if (spreadsheetId==null||spreadsheetId=='') {
             
             if (!(request[0].createNew)) {
                 // No spreadsheet ID provided and createNew = false
@@ -106,13 +111,10 @@ public with sharing class GSheet {
             // We have a valid spreadsheet ID and a valid tab ID. 
             String commaFields = request[0].fieldList;
             // if no field list is provided, we will use all fields from the first record
-            if (commaFields == null) {
-                Map<String, Object> fs = request[0].inputObjects[0].getPopulatedFieldsAsMap();            
-                for (String Field : fs.keySet() ){
-                    fieldList.add(Field);
-                }
+            if (commaFields == null||commaFields=='') {
+                fieldList = fields(firstObject);
             } else {
-                // if a field list is provided, we will those
+                // if a field list is provided, we will use those
                 fieldList =  request[0].fieldList.split('[,; ]{1}[\\s]?');
             }
             
@@ -120,13 +122,13 @@ public with sharing class GSheet {
             integer row = 0;
             
             response.header =  header(); // run allways to set column types
-            if (IncludeHeader) {
+            if (includeHeader) {
                 // create a nice header row in the spreadsheet with the field names
                 json +=  response.header;
                 row++;
             }
             // Loop all fields inside all records, for each add an entry in the Json String
-            for (Sobject obj : request[0].inputObjects ) {
+            for (Sobject obj : allObjects ) {
                 // for each record in the input list, add a row in the spreadsheet
                 if (row>0) {
                     json+= ','; // json 'newline' for each record
@@ -134,14 +136,23 @@ public with sharing class GSheet {
                 json += ' [';
                 Map<String, Object> fieldsAndValues = obj.getPopulatedFieldsAsMap();            
                 Integer i = 0;
-                For (String Field : fieldList ){
+                sObject child;
+                Object value ;
+                For (String field : fieldList ){
                     if (i>0) {
                         json+=',';
                     }    
-                    try {     
-                        json += '"'+stringify(fieldsAndValues.get(Field),columnTypes[i])+'"';  
+                    try {    
+                        if (field.contains('__r')){
+                            system.debug('### '+field);
+                            child = (sobject) fieldsAndValues.get(field.substringBefore('.'));
+                            value = child.get(field.substringAfter('.'));
+                        } else {
+                            value = fieldsAndValues.get(field);
+                        }
+                        json += '"'+stringify(value,columnTypes[i],field)+'"';  
                     } catch (Exception e) {
-                        json   = '\''+Field+'\' not found!';      
+                        json += '"-'+field+'- not found!"';      
                     }          
                     i++;
                 }          
@@ -157,7 +168,7 @@ public with sharing class GSheet {
             // calculate the range of the spreadsheet to update and call the API 'Values:Update' method to transfer the unformatted data. 
             // We'll do an update for the formatting per column afterwards.
             response.range = range(response.rows, response.columns); //'A'+ String.valueOf(request[0].offset+1)+':'+onchar+String.valueOf(response.rows+request[0].offset);            
-            responseHttp = executeCallout('PUT','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId+'/values/'+response.range+'?&valueInputOption=USER_ENTERED',response.jsonstring);
+            responseHttp = executeCallout('PUT','callout:'+callOut+'/v4/spreadsheets/'+spreadsheetId+'/values/'+response.range+'?&valueInputOption=USER_ENTERED',response.jsonstring);
             response.ResponseCode = responseHttp.getStatusCode(); // should be 200
             if (responseHttp.getStatusCode()!=200) {
                 // share the error back to the flow response
@@ -166,7 +177,7 @@ public with sharing class GSheet {
                 // now let's call the API to format the rows
                 String formatRequest = format() ;
                 if (formatRequest.length()>0){
-                    responseHttp = executeCallout('POST','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId+':batchUpdate',formatRequest);
+                    responseHttp = executeCallout('POST','callout:'+callOut+'/v4/spreadsheets/'+spreadsheetId+':batchUpdate',formatRequest);
                     response.ResponseCode = responseHttp.getStatusCode();
                     if (responseHttp.getStatusCode()!=200) {
                         // something went wrong with the API call to format the rows. Let's make sure to share back the why
@@ -184,19 +195,42 @@ public with sharing class GSheet {
         return responseList;     
     } 
 
+    public static list <string> fields(sObject obj) {
+        // This method creates a list of all fields in the object, including nested fields
+        // It will suppress ID fields by default
+        list <string> fields = new list <string>();
+        list <string> nested;
+        Object fieldValue;
+        Map<String, Object> fs = obj.getPopulatedFieldsAsMap();            
+        for (String fieldName : fs.keySet() ){
+            if (fieldName.contains('__r')) {
+                nested = fields( (sobject) fs.get(fieldName) );
+                for (String f : nested){
+                    fields.add(fieldName+'.'+f);
+                   // system.debug('##F'+fieldname+'.'+f);
+                }
+            } else  {
+                fieldValue = fs.get(fieldName);
+                if ( !(fieldValue instanceof Id)) {
+                   fields.add(fieldName);
+                }
+            }
+        }
+        return fields;
+    }
+
     public static boolean parsesheets() {
         // Verify the spreadsheet exist and is accesible - then verify the tab id (gid) and retrieve the title for the target GID
-        HttpResponse responseHttp = executeCallout('GET','callout:'+CallOut+'/v4/spreadsheets/'+SpreadsheetId);
+        HttpResponse responseHttp = executeCallout('GET','callout:'+callOut+'/v4/spreadsheets/'+spreadsheetId);
         boolean ret = (responseHttp.getStatusCode()==200);
+        system.debug('##gid='+String.valueOf(gid));
+
         if (ret) {
             ret = false ;// spreadsheet exists but we must also find the gid!
-           // system.debug('##X'+responseHttp.getBody());
             JSONParse parser = new JSONParse(responseHttp.getBody()).get('sheets');
             for(JSONParse sheet : parser.asList()) {
-              //  System.debug('##S'+String.valueOf(sheet.get('properties.sheetId').getIntegerValue()));
                 if (sheet.get('properties.sheetId').getIntegerValue()==gid) {
-                    TabTitle = sheet.get('properties.title').getStringValue() ;
-     //               System.debug('## gid found title ='+TabTitle);
+                    tabTitle = sheet.get('properties.title').getStringValue() ;
                     return true;
                 } 
             }
@@ -211,13 +245,13 @@ public with sharing class GSheet {
 
     public static boolean createNew(String title) {
         //  create a new spreadsheet and set the spreadsheet id and gid
-        HttpResponse responseHttp = executeCallout('POST','callout:'+CallOut+'/v4/spreadsheets','{ "properties": { "title": "'+title+'" } }');
+        HttpResponse responseHttp = executeCallout('POST','callout:'+callOut+'/v4/spreadsheets','{ "properties": { "title": "'+title+'" } }');
         boolean ret = (responseHttp.getStatusCode()==200);
         if (ret) {
             JSONParse parser = new JSONParse(responseHttp.getBody());      
-            SpreadsheetId = parser.get('spreadsheetId').getStringValue();
+            spreadsheetId = parser.get('spreadsheetId').getStringValue();
             gid = parser.get('sheets.[0].properties.sheetId').getIntegerValue();
-            TabTitle = parser.get('sheets.[0].properties.title').getStringValue();
+            tabTitle = parser.get('sheets.[0].properties.title').getStringValue();
             fileName =  parser.get('spreadsheetUrl').getStringValue();
         } else {
             lastError = responseHttp.getStatus();
@@ -229,39 +263,53 @@ public with sharing class GSheet {
         // Calculate a string description of the range of cells. A 4 x 2 array becomes A1:D2
         // the optional row/col offsets change the starting row and/or column
         
-        String range = String.fromCharArray( new List<integer> { 65+ colOffset } )+String.valueOf(RowOffset+1)+':'; 
-        integer mod = Math.mod(col+ColOffset, 26);
+        String range = String.fromCharArray( new List<integer> { 65+ colOffset } )+String.valueOf(rowOffset+1)+':'; 
+        integer mod = Math.mod(col+colOffset, 26);
         if (mod==0) {
             mod=26;
         }
-        integer fulltwentysix = ((col+ColOffset-1)/26);
+        integer fulltwentysix = ((col+colOffset-1)/26);
         if (fulltwentysix>0) {
             range+=String.fromCharArray( new List<integer> { 64+ fulltwentysix } );
         }
         range += String.fromCharArray( new List<integer> { 64+ mod } );
-        range += String.valueOf(row+RowOffset);
+        range += String.valueOf(row+rowOffset);
         
-        return '\''+TabTitle+'\'!'+range ;
+        return '\''+tabTitle.replaceAll('[ ]','%20')+'\'!'+range ;
     }
     
     public static String header() {
-        Schema.SObjectType leadSchema =  FirstObject.getSObjectType();
+        Schema.SObjectType leadSchema =  firstObject.getSObjectType();
         Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
         String header ='[';
         String fieldName;
         Integer i = 0;
+        sobject child;
+        Map<String, Schema.SObjectField> childFields;
+        Object childField;
         For (String field : fieldList ){
             if (i>0) {
                 header+=',';
             }
-            try {
-                fieldName = fieldMap.get(field).getDescribe().getLabel();
-                columnTypes.add( fieldMap.get(field).getDescribe().getType().name() );
-            } catch (Exception e) {
-                fieldName   = '\''+field+'\' not found!';   
-                columnTypes.add('STRING');     
+            if (field.contains('.')) {
+                child = firstObject.getSObject(field.substringBefore('.'));
+                childFields = child.getSObjectType().getDescribe().fields.getMap();
+                try {
+                    fieldName =  childFields.get(field.substringAfter('.')).getDescribe().getLabel();
+                    columnTypes.add( childFields.get(field.substringAfter('.')).getDescribe().getType().name() );        
+                } catch (Exception e) {
+                    fieldName   = '\''+field+'\' not found!';   
+                    columnTypes.add('STRING');     
+                }
+            } else {
+                try {
+                    fieldName = fieldMap.get(field).getDescribe().getLabel();
+                    columnTypes.add( fieldMap.get(field).getDescribe().getType().name() );
+                } catch (Exception e) {
+                    fieldName   = '\''+field+'\' not found!';   
+                    columnTypes.add('STRING');     
+                }
             }
-            System.debug('## '+field+' - '+columnTypes[i]);
             header += '"'+fieldName+'"';
             i++;
         }
@@ -275,7 +323,7 @@ public with sharing class GSheet {
         // For the data rows we apply a number format based on the type of the field - we use batch formatting to reduce the number of calls to the API
         // We batch per column.
 
-        Schema.SObjectType leadSchema =  FirstObject.getSObjectType();
+        Schema.SObjectType leadSchema =  firstObject.getSObjectType();
         Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
         
         String requestStr ='[';
@@ -286,14 +334,14 @@ public with sharing class GSheet {
         Integer rows = allObjects.size();
         Integer digits;
         String formatPart;
-        if (IncludeHeader) {
+        if (includeHeader) {
             headerCount ++;
-            requestStr +=   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(ColOffset)+',"startRowIndex": '+String.valueOf(RowOffset)+',"endColumnIndex": '+String.valueOf(ColOffset+fieldList.size())+', "endRowIndex": '+String.valueOf(RowOffset+headerCount)+' },  "fields": "userEnteredFormat.textFormat.bold",  "cell": {"userEnteredFormat": { "textFormat": { "bold": true }}}}}';
+            requestStr +=   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(colOffset)+',"startRowIndex": '+String.valueOf(rowOffset)+',"endColumnIndex": '+String.valueOf(colOffset+fieldList.size())+', "endRowIndex": '+String.valueOf(rowOffset+headerCount)+' },  "fields": "userEnteredFormat.textFormat.bold",  "cell": {"userEnteredFormat": { "textFormat": { "bold": true }}}}}';
             i++;
         }
-        For (String Field : fieldList ){
+        For (String field : fieldList ){
             try {
-                field =  String.valueOf(fieldMap.get(Field).getDescribe().getType());
+                field =  String.valueOf(fieldMap.get(field).getDescribe().getType());
             } catch (Exception e) {
                 field   = 'UNKOWN FIELD';        
             }
@@ -315,7 +363,7 @@ public with sharing class GSheet {
                         formatPart = '{ "numberFormat": {"type": "PERCENT" }}' ;
                     }
                 }
-                one =   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(col+ColOffset)+',"startRowIndex": '+String.valueOf(RowOffset+headerCount)+',"endColumnIndex": '+String.valueOf(col+ColOffset+1)+', "endRowIndex": '+String.valueOf(rows+RowOffset+headerCount)+' },  "fields": "userEnteredFormat.numberFormat",  "cell": {"userEnteredFormat": '+formatPart+'}}} ';
+                one =   '{"repeatCell": { "range":{"sheetId":'+String.valueOf(gid)+',"startColumnIndex":'+String.valueOf(col+colOffset)+',"startRowIndex": '+String.valueOf(rowOffset+headerCount)+',"endColumnIndex": '+String.valueOf(col+colOffset+1)+', "endRowIndex": '+String.valueOf(rows+rowOffset+headerCount)+' },  "fields": "userEnteredFormat.numberFormat",  "cell": {"userEnteredFormat": '+formatPart+'}}} ';
                 requestStr += one;              
                 i++;
             }
@@ -330,10 +378,12 @@ public with sharing class GSheet {
         return requestStr;
     }   
     
-    public static String stringify( object o ,String fieldType){ 
+    public static String stringify( object o ,String fieldType,String field){ 
         if(o==null)                         return '';              // we can't say much about null
         String                              result  = 'Object';     // if we can't find out anything, we will return 'Object'
-        if(o instanceof SObject)            return ((SObject)o).getSObjectType().getDescribe().getName()+''; 
+        if(o instanceof SObject)            {
+             return ((SObject)o).getSObjectType().getDescribe().getName()+''; 
+        }
         if(o instanceof Boolean)            return string.valueOf((Boolean)o);
         if(o instanceof Id)                 return (String)o;
         if(o instanceof String)             return (String)o;
@@ -389,7 +439,6 @@ public with sharing class GSheet {
             }
         }
         HttpResponse response = new Http().send(request);
-        System.debug('##R '+requestBody);
         return response;
     }  
     
@@ -436,26 +485,30 @@ public with sharing class GSheet {
         @invocableVariable(label ='Tab ID (default is 0) - this will override url provided gid!')
         public integer tabId ;
         
-        @invocableVariable(label ='Collection of Sobjects each record will become one row in the output' required=true)
+        @invocableVariable(label ='Collection of Sobjects each record will become one row in the output. If not supplied an SOQL expression needs to be provided.' )
         public List<Sobject> inputObjects;
         
-        @invocableVariable(label ='Fieldnames comma separated, if empty/not provided all fields from sObject will be exported')
+        @invocableVariable(label ='SOQL query to use')
+        public String soqlQuery;
+
+        @invocableVariable(label ='Fieldnames comma separated, if empty/not provided all fields from the sObject will be exported, without the ID fields')
         public String fieldList;
+
+        @invocableVariable(label ='Create new spreadsheet if no URL or ID specified')
+        public Boolean createNew;
+
+        @invocableVariable(label ='Title to use for new spreadsheet')
+        public String newSpreadsheetTitle;
         
         @invocableVariable(label ='Include a header row, default = TRUE')
         public Boolean includeHeader;
-        
+                
         @invocableVariable(label ='Row Offset (default=0, ie start writing row 1)')
         public integer offset;
         
         @invocableVariable(label ='Col Offset (default=0, ie start writing column A)')
         public integer colOffset;   
         
-        @invocableVariable(label ='Create new spreadsheet if no URL or ID specified')
-        public Boolean createNew;
-
-        @invocableVariable(label ='Title to use for new spreadsheet')
-        public String newSpreadsheetTitle;
 
     }
 }
