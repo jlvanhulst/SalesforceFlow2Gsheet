@@ -11,20 +11,34 @@ public with sharing class GSheetTest {
         GSheet.Request element = new GSheet.Request();
         List<sObject> obj = new List<sObject>();
         obj.add((sObject)Acc);
-        element.inputObjects = obj;
-        element.googleSheetId ='testid123';
+        element.createNew = false;
+        element.soqlQuery = 'SELECT Name,Website,AnnualRevenue FROM Account';
         aList.add(element);
-        
+
         List<GSheet.Response> testResponseList = GSheet.row(aList);
-        element.googleFileUrl='https://docs.google.com/spreadsheets/d/testid123/edit#gid=1229423180';    
-        element.fieldList ='Website,Name,AnnualRevenue';
-        List<GSheet.Response> testResponseList2 = GSheet.row(aList);
         
+        element.soqlQuery = null;
+        element.createNew = true;
+        element.inputObjects = obj;
+        element.googleSheetId ='run2testid123';
+        alist = new List<GSheet.Request>();
+        aList.add(element);
+        List<GSheet.Response> testResponseList2 = GSheet.row(aList);
+
+        element.googleFileUrl='https://docs.google.com/spreadsheets/d/testirun3/edit#gid=1229423180';    
+        alist = new List<GSheet.Request>();
+        aList.add(element);
+        List<GSheet.Response> testResponseList3 = GSheet.row(aList);
+
+        element.fieldList ='Website,Name,AnnualRevenue';
         element.createNew = true;
         element.googleFileUrl=null;
         element.googleSheetId = null;
-        List<GSheet.Response> testResponseList3 = GSheet.row(aList);
-
+        element.newSpreadsheetTitle = 'testrun4';
+        alist = new List<GSheet.Request>();
+        aList.add(element);
+        List<GSheet.Response> testResponseList4 = GSheet.row(aList);
+        System.assert(testresponseList4[0].newSpreadsheet,true);
     }
     
 }

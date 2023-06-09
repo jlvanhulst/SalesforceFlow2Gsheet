@@ -1,17 +1,18 @@
 public with sharing class GSheet {
-    public static string spreadsheetId;          // google spreadsheet id
-    public static integer gid;                   // tab id within the spreadsheet (gid=0 is default)
-    public static string tabTitle;               // Title of the sheets, used for updating values. Retrieved from the spreadsheet properties based on gid
-    public static string callOut;                // named credential to use
-    public static boolean includeHeader;         // add a header row - default true
-    public static integer colOffset;             // column offset - default is 0
-    public static integer rowOffset;             // row offset - default is 0
-    public static SObject firstObject;           // first object of the collection 
-    public static List<Sobject> allObjects;      // collection of records to be exported
-    public static String[] fieldList;            // list of display names of fields (columns)
-    public static string fileName;               // the full url of the google spreadsheet
-    public static string lastError;              // the last API call error description
-    public static List<String> columnTypes;      // Keep track of the object type per column
+    private static string spreadsheetId;          // google spreadsheet id
+    private static integer gid;                   // tab id within the spreadsheet (gid=0 is default)
+    private static string tabTitle;               // Title of the sheets, used for updating values. Retrieved from the spreadsheet properties based on gid
+    private static string callOut;                // named credential to use
+    private static boolean includeHeader;         // add a header row - default true
+    private static integer colOffset;             // column offset - default is 0
+    private static integer rowOffset;             // row offset - default is 0
+    private static SObject firstObject;           // first object of the collection 
+    private static List<Sobject> allObjects;      // collection of records to be exported
+    private static String[] fieldList;            // list of display names of fields (columns)
+    private static string fileName;               // the full url of the google spreadsheet
+    private static string lastError;              // the last API call error description
+    private static List<String> columnTypes;      // Keep track of the object type per column
+    private static List<String> footerFormulas;   // For each column, keep track of the formula to be used in the footer row
     
     @invocableMethod(label='Export any collection of sOjects to a Google Spreadsheet' description='Provide a collection of records or an SOQL query and export them to a Google Spreadsheet')
     public static List<Response> row(List<Request> request) {
@@ -33,34 +34,24 @@ public with sharing class GSheet {
                 return responseList;      
             }
         } 
-        if (request[0].inputObjects==null) {
+        if (request[0].inputObjects==null||request[0].inputObjects.size()==0) {
             response.ErrorMessage = 'No records provided!';
             responseList.add(response);
             return responseList;      
         }
+
         allObjects    = request[0].inputObjects;
         firstObject   = request[0].inputObjects[0];
         fieldList     = new List<String>();
         callOut       = Request[0].callout;
 
-        // Set default values for optional parameters
-        if (request[0].offset==null) {
-            request[0].offset = 0;
-        }   
-        if (request[0].colOffset==null) {
-            request[0].colOffset = 0;
-        } 
-        if (request[0].includeHeader==null) {
-            request[0].includeHeader = true;
-        }
-        if (request[0].createNew==null) {
-            request[0].createNew =False;
-        }
-
-        includeHeader = request[0].includeHeader;
-        rowOffset     = request[0].offset;
-        colOffset     = request[0].colOffset;
+        footerFormulas = request[0].footerFormulas==null ? new List<String>() : request[0].footerFormulas.split('[,; ]{1}[\\s]?');
+        includeHeader = request[0].includeHeader==null ? true : request[0].includeHeader;
+        rowOffset     = request[0].offset==null ? 0 : request[0].offset;
+        colOffset     = request[0].colOffset==null ? 0 : request[0].colOffset;
  
+        request[0].createNew= request[0].createNew=null ? false : request[0].createNew;
+
         /* The google spreadsheet ID can be provided directly as a parameter or through the full spreadsheet url. 
          If both are provided, the ID in the request will be used.
         
@@ -121,7 +112,8 @@ public with sharing class GSheet {
             string json = '[';  
             integer row = 0;
             
-            response.header =  header(); // run allways to set column types
+            response.header =  header(); // run allways to set column types and also process footer formulas
+
             if (includeHeader) {
                 // create a nice header row in the spreadsheet with the field names
                 json +=  response.header;
@@ -158,6 +150,11 @@ public with sharing class GSheet {
                 }          
                 json += ' ]';
                 row ++;          
+            }
+            If (footerFormulas.size()>0) {
+                // add a footer row with formulas
+                json += ','+footer(row);
+                row ++;
             }
             json += ']';
             
@@ -278,6 +275,24 @@ public with sharing class GSheet {
         return '\''+tabTitle.replaceAll('[ ]','%20')+'\'!'+range ;
     }
     
+    public static string footer(integer rows) {
+        string footer = '[';
+        Integer i = 0;
+        // return the footer row with formulas as specificed in the formulaList
+        for (String formula : footerFormulas) {
+            if (i>0) {
+                footer+=',';
+            }
+            formula = formula.trim();
+            if (formula.length()>0) {
+                footer += '"='+formula+'(INDIRECT(\\\"R[-'+String.valueOf(rows)+']C[0]:R[-1]C[0]\\\",FALSE))"';
+            } else {
+                footer += '""';
+            }
+            i++;
+        }
+        return footer+']';
+    }
     public static String header() {
         Schema.SObjectType leadSchema =  firstObject.getSObjectType();
         Map<String, Schema.SObjectField> fieldMap = leadSchema.getDescribe().fields.getMap();
@@ -332,6 +347,9 @@ public with sharing class GSheet {
         String one;
         Integer headerCount = 0;
         Integer rows = allObjects.size();
+        if (footerFormulas.size()>0) {
+            rows++;
+        }
         Integer digits;
         String formatPart;
         if (includeHeader) {
@@ -502,6 +520,9 @@ public with sharing class GSheet {
         
         @invocableVariable(label ='Include a header row, default = TRUE')
         public Boolean includeHeader;
+
+        @invocableVariable(label ='Footer row formulas, comma separated')
+        public String footerFormulas;
                 
         @invocableVariable(label ='Row Offset (default=0, ie start writing row 1)')
         public integer offset;

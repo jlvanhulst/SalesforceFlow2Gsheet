@@ -3,10 +3,21 @@
     {
       "path": "force-app/",
       "default": true
+    },
+    {
+      "path": "gsheet-flow",
+      "package": "Google Spreadsheet Flow Action Component",
+      "versionName": "ver 0.1",
+      "versionNumber": "0.1.0.NEXT",
+      "default": false,
+      "versionDescription": ""
     }
   ],
   "name": "Google Sheets",
-  "namespace": "",
+  "namespace": "valorventures",
   "sfdcLoginUrl": "https://login.salesforce.com",
-  "sourceApiVersion": "55.0"
+  "sourceApiVersion": "55.0",
+  "packageAliases": {
+    "Google Spreadsheet Flow Action Component": "0HoEY000000000k0AA"
+  }
 }
